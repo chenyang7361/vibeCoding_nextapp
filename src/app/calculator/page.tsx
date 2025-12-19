@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import ItemSelector from '../../components/ItemSelector';
 import RecipeDisplay from '../../components/RecipeDisplay';
-import { getMaterialTree, Item, Recipe, Factory, MaterialNode } from '../../utils/recipeCalculator';
+import { getMaterialTree, calculateTotalEnergy, Item, Recipe, Factory, MaterialNode, FactorySummary } from '../../utils/recipeCalculator';
 
 /**
  * 应用全局工厂选择到所有材料
@@ -673,6 +673,60 @@ export default function CalculatorPage() {
                     暂无材料数据
                   </div>
                 )}
+                
+                {/* 合计行 */}
+                {demand.materials.length > 0 && (() => {
+                  const summary = calculateTotalEnergy(demand.materials, items);
+                  return (
+                    <div className="mt-4 pt-3 border-t border-blue-500/30">
+                      <div className="px-3 py-2 bg-gray-900/50 rounded-lg space-y-3">
+                        {/* 标题 */}
+                        <div className="text-sm text-blue-300 font-semibold">合计</div>
+                        
+                        {/* 工厂汇总 */}
+                        {summary.factories.length > 0 && (
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs text-gray-400">设备:</span>
+                            {summary.factories.map(factory => (
+                              <div 
+                                key={factory.id}
+                                className="flex items-center gap-1 px-2 py-1 bg-gray-800/50 rounded border border-gray-700/50"
+                                title={`${items.find(i => i.ID === factory.id)?.Name || ''}`}
+                              >
+                                <img 
+                                  src={`/icon/Vanilla/${factory.iconName}.png`}
+                                  alt=""
+                                  className="w-5 h-5"
+                                />
+                                <span className="text-xs text-purple-300 font-mono">
+                                  {factory.count.toFixed(3)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        
+                        {/* 总耗能 */}
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-400">总耗能:</span>
+                          <span className="text-sm text-yellow-300 font-mono font-semibold">
+                            {summary.totalEnergy.toFixed(3)} MW
+                          </span>
+                        </div>
+                        
+                        {/* 占地面积 */}
+                        {summary.totalSpace > 0 && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-gray-400">占地面积:</span>
+                            <span className="text-sm text-cyan-300 font-mono font-semibold">
+                              {summary.totalSpace.toFixed(2)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           ))}

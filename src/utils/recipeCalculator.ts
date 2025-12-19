@@ -330,3 +330,87 @@ export function getMaterialTree(
   
   return deductedResult;
 }
+
+/**
+ * 工厂汇总信息类型
+ */
+export interface FactorySummary {
+  id: number;
+  iconName: string;
+  count: number;
+}
+
+/**
+ * 总计信息类型
+ */
+export interface TotalSummary {
+  totalEnergy: number;  // 总耗能(MW)
+  factories: FactorySummary[];  // 工厂汇总列表
+  totalSpace: number;  // 总占地面积
+}
+
+/**
+ * 计算材料列表的总耗能、工厂汇总和占地面积
+ * @param materials 材料节点列表
+ * @param items 所有物品数据(包含工厂数据)
+ * @returns 总计信息
+ */
+export function calculateTotalEnergy(
+  materials: MaterialNode[],
+  items: Item[]
+): TotalSummary {
+  let totalEnergy = 0;
+  let totalSpace = 0;
+  // 工厂汇总: 工厂ID -> 数量
+  const factoryMap = new Map<number, number>();
+  
+  materials.forEach(material => {
+    // 获取选中的工厂
+    const selectedFactory = material.availableFactories?.find(
+      f => f.id === material.selectedFactoryId
+    );
+    
+    if (!selectedFactory) {
+      return; // 没有工厂,跳过
+    }
+    
+    // 从items中查找工厂的WorkEnergyPerTick和Space
+    const factoryItem = items.find(item => item.ID === selectedFactory.id);
+    const workEnergyPerTick = (factoryItem as any)?.WorkEnergyPerTick;
+    const space = (factoryItem as any)?.Space;
+    
+    if (workEnergyPerTick && selectedFactory.count) {
+      // 计算该工厂的总耗能 = WorkEnergyPerTick * 0.00006 * 工厂数量
+      const energy = workEnergyPerTick * 0.00006 * selectedFactory.count;
+      totalEnergy += energy;
+    }
+    
+    if (space && selectedFactory.count) {
+      // 累加占地面积
+      totalSpace += space * selectedFactory.count;
+    }
+    
+    // 累加工厂数量
+    const existingCount = factoryMap.get(selectedFactory.id) || 0;
+    factoryMap.set(selectedFactory.id, existingCount + selectedFactory.count);
+  });
+  
+  // 转换工厂汇总为数组,并添加图标信息
+  const factories: FactorySummary[] = [];
+  factoryMap.forEach((count, factoryId) => {
+    const factoryItem = items.find(item => item.ID === factoryId);
+    if (factoryItem) {
+      factories.push({
+        id: factoryId,
+        iconName: factoryItem.IconName,
+        count: count
+      });
+    }
+  });
+  
+  return {
+    totalEnergy,
+    factories,
+    totalSpace
+  };
+}
