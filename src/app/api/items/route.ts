@@ -3,9 +3,9 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 /**
- * API 路由：获取所有物品数据
+ * API 路由：获取所有物品和配方数据
  * GET /api/items
- * 返回 Vanilla.json 中的 items 数组
+ * 返回 Vanilla.json 中的 items 数组和 recipes 数组
  */
 export async function GET() {
   try {
@@ -21,8 +21,11 @@ export async function GET() {
     // 解析 JSON 数据
     const data = JSON.parse(fileContents);
     
-    // 返回物品列表
-    return NextResponse.json({ items: data.items });
+    // 返回物品列表和配方列表
+    return NextResponse.json({ 
+      items: data.items,
+      recipes: data.recipes 
+    });
   } catch (error) {
     console.error('读取物品数据失败:', error);
     return NextResponse.json(
