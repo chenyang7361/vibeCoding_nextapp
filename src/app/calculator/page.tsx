@@ -6,6 +6,76 @@ import RecipeDisplay from '../../components/RecipeDisplay';
 import { getMaterialTree, Item, Recipe, Factory, MaterialNode } from '../../utils/recipeCalculator';
 
 /**
+ * 应用全局工厂选择到所有材料
+ * @param itemId 物品ID
+ * @param globalFactorySelections 全局工厂选择
+ * @param items 所有物品数据
+ * @param recipes 所有配方数据
+ * @param factories 所有工厂数据
+ * @returns 更新后的工厂选择映射
+ */
+function applyGlobalFactorySelections(
+  itemId: number,
+  globalFactorySelections: {
+    smelter?: number;
+    assembler?: number;
+    lab?: number;
+    miner?: number;
+    chemical?: number;
+  },
+  items: Item[],
+  recipes: Recipe[],
+  factories: Factory[]
+): Map<number, number> {
+  const factorySelections = new Map<number, number>();
+  
+  // 定义工厂类型到工厂ID的映射
+  const factoryTypeMap: { [key: number]: 'smelter' | 'assembler' | 'lab' | 'miner' | 'chemical' | null } = {
+    2302: 'smelter', 2315: 'smelter', 2319: 'smelter',  // 熔炉
+    2303: 'assembler', 2304: 'assembler', 2305: 'assembler', 2318: 'assembler',  // 制造台
+    2901: 'lab', 2902: 'lab',  // 研究站
+    2301: 'miner', 2316: 'miner',  // 采矿机
+    2309: 'chemical', 2317: 'chemical'  // 化工厂
+  };
+  
+  // 递归遍历所有材料，应用全局工厂选择
+  function traverse(currentItemId: number, visited = new Set<number>()) {
+    if (visited.has(currentItemId)) return;
+    visited.add(currentItemId);
+    
+    // 查找配方
+    const itemRecipes = recipes.filter(r => r.Results && r.Results.includes(currentItemId));
+    if (itemRecipes.length === 0) return;
+    
+    const recipe = itemRecipes[0];  // 使用第一个配方
+    
+    // 处理当前物品的工厂
+    if (recipe.Factories && recipe.Factories.length > 0) {
+      const firstFactoryId = recipe.Factories[0];
+      const factoryType = factoryTypeMap[firstFactoryId];
+      
+      if (factoryType && globalFactorySelections[factoryType]) {
+        // 检查全局选择的工厂是否在可用工厂列表中
+        const selectedFactoryId = globalFactorySelections[factoryType]!;
+        if (recipe.Factories.includes(selectedFactoryId)) {
+          factorySelections.set(currentItemId, selectedFactoryId);
+        }
+      }
+    }
+    
+    // 递归处理原料
+    if (recipe.Items) {
+      recipe.Items.forEach(materialId => {
+        traverse(materialId, new Set(visited));
+      });
+    }
+  }
+  
+  traverse(itemId);
+  return factorySelections;
+}
+
+/**
  * 物品需求数据类型
  */
 interface ItemDemand {
@@ -35,6 +105,14 @@ export default function CalculatorPage() {
   const [factories, setFactories] = useState<Factory[]>([]);
   // 存储输入框的临时值
   const [tempValues, setTempValues] = useState<{ [key: number]: string }>({});
+  // 全局工厂选择：工厂类型 -> 工厂ID
+  const [globalFactorySelections, setGlobalFactorySelections] = useState<{
+    smelter?: number;      // 熔炉
+    assembler?: number;    // 制造台
+    lab?: number;          // 研究站
+    miner?: number;        // 采矿机
+    chemical?: number;     // 化工厂
+  }>({});
 
   // 组件加载时读取数据
   useEffect(() => {
@@ -43,9 +121,18 @@ export default function CalculatorPage() {
       .then(data => {
         setItems(data.items || []);
         setRecipes(data.recipes || []);
-        // 工厂数据也在items数组中,过滤出有Speed字段的
+        // 工厂数据也在items数组中,过滤出Speed字段的
         const factoryData = (data.items || []).filter((item: any) => item.Speed !== undefined);
         setFactories(factoryData);
+          
+        // 初始化全局工厂选择（选择最高级的）
+        setGlobalFactorySelections({
+          smelter: 2319,    // 负熙熔炉
+          assembler: 2318,  // 重组式制造台
+          lab: 2902,        // 自演化研究站
+          miner: 2316,      // 大型采矿机
+          chemical: 2317    // 量子化工厂
+        });
       })
       .catch(error => {
         console.error('加载数据失败:', error);
@@ -56,8 +143,14 @@ export default function CalculatorPage() {
   const handleSelectItem = (item: { ID: number; Name: string; IconName: string }) => {
     // 初始化配方选择映射
     const recipeSelections = new Map<number, number>();
-    // 初始化工厂选择映射
-    const factorySelections = new Map<number, number>();
+    // 应用全局工厂选择
+    const factorySelections = applyGlobalFactorySelections(
+      item.ID,
+      globalFactorySelections,
+      items,
+      recipes,
+      factories
+    );
     // 计算材料分解树(默认每分钟60个)
     const materials = getMaterialTree(item.ID, 60, items, recipes, factories, new Set(), recipeSelections, factorySelections);
     
@@ -146,7 +239,49 @@ export default function CalculatorPage() {
     setDemands(newDemands);
   };
 
-  // 处理工厂切换
+  // 处理全局工厂切换
+  const handleGlobalFactoryChange = (factoryType: 'smelter' | 'assembler' | 'lab' | 'miner' | 'chemical', factoryId: number) => {
+    // 更新全局工厂选择
+    const newGlobalFactorySelections = {
+      ...globalFactorySelections,
+      [factoryType]: factoryId
+    };
+    setGlobalFactorySelections(newGlobalFactorySelections);
+    
+    // 更新所有需求的工厂选择
+    const newDemands = demands.map(demand => {
+      // 为每个需求应用新的全局工厂选择
+      const updatedFactorySelections = applyGlobalFactorySelections(
+        demand.id,
+        newGlobalFactorySelections,
+        items,
+        recipes,
+        factories
+      );
+      
+      // 重新计算材料树
+      const materials = getMaterialTree(
+        demand.id,
+        demand.perMinute,
+        items,
+        recipes,
+        factories,
+        new Set(),
+        demand.recipeSelections,
+        updatedFactorySelections
+      );
+      
+      return {
+        ...demand,
+        factorySelections: updatedFactorySelections,
+        materials: materials
+      };
+    });
+    
+    setDemands(newDemands);
+  };
+
+  // 处理单个物品的工厂切换（不影响其他物品）
   const handleFactoryChange = (demandIndex: number, materialId: number, factoryId: number) => {
     const newDemands = [...demands];
     const demand = newDemands[demandIndex];
@@ -189,15 +324,203 @@ export default function CalculatorPage() {
           戴森球计划 - 量化计算器
         </h1>
 
-        {/* 增加需求按钮 */}
-        <button
-          onClick={() => setShowSelector(true)}
-          className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-lg 
-                     hover:from-blue-600 hover:to-purple-600 transition-all duration-200 
-                     shadow-lg hover:shadow-xl transform hover:scale-105"
-        >
-          + 增加需求
-        </button>
+        {/* 增加需求按钮和全局工厂选择 */}
+        <div className="flex items-start gap-4 flex-wrap">
+          <button
+            onClick={() => setShowSelector(true)}
+            className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-lg 
+                       hover:from-blue-600 hover:to-purple-600 transition-all duration-200 
+                       shadow-lg hover:shadow-xl transform hover:scale-105"
+          >
+            + 增加需求
+          </button>
+          
+          {/* 全局工厂选择 */}
+          <div className="flex flex-col gap-2">
+            <span className="text-sm text-gray-400">全局设备：</span>
+            <div className="flex items-center gap-3 flex-wrap">
+              
+              {/* 熔炉 */}
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-gray-500 text-center">熔炉</span>
+                <div className="flex items-center gap-1">
+                  <div 
+                    onClick={() => handleGlobalFactoryChange('smelter', 2302)}
+                    className={`p-1 rounded cursor-pointer transition-colors ${
+                      globalFactorySelections.smelter === 2302
+                        ? 'bg-blue-500/30 border-2 border-blue-500'
+                        : 'bg-gray-700/50 border-2 border-gray-600 hover:border-blue-400'
+                    }`}
+                    title="电弧熔炉"
+                  >
+                    <img src="/icon/Vanilla/smelter.png" alt="电弧熔炉" className="w-8 h-8" />
+                  </div>
+                  <div 
+                    onClick={() => handleGlobalFactoryChange('smelter', 2315)}
+                    className={`p-1 rounded cursor-pointer transition-colors ${
+                      globalFactorySelections.smelter === 2315
+                        ? 'bg-blue-500/30 border-2 border-blue-500'
+                        : 'bg-gray-700/50 border-2 border-gray-600 hover:border-blue-400'
+                    }`}
+                    title="位面熔炉"
+                  >
+                    <img src="/icon/Vanilla/smelter-2.png" alt="位面熔炉" className="w-8 h-8" />
+                  </div>
+                  <div 
+                    onClick={() => handleGlobalFactoryChange('smelter', 2319)}
+                    className={`p-1 rounded cursor-pointer transition-colors ${
+                      globalFactorySelections.smelter === 2319
+                        ? 'bg-blue-500/30 border-2 border-blue-500'
+                        : 'bg-gray-700/50 border-2 border-gray-600 hover:border-blue-400'
+                    }`}
+                    title="负熙熔炉"
+                  >
+                    <img src="/icon/Vanilla/smelter-3.png" alt="负熙熔炉" className="w-8 h-8" />
+                  </div>
+                </div>
+              </div>
+              
+              {/* 制造台 */}
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-gray-500 text-center">制造台</span>
+                <div className="flex items-center gap-1">
+                  <div 
+                    onClick={() => handleGlobalFactoryChange('assembler', 2303)}
+                    className={`p-1 rounded cursor-pointer transition-colors ${
+                      globalFactorySelections.assembler === 2303
+                        ? 'bg-blue-500/30 border-2 border-blue-500'
+                        : 'bg-gray-700/50 border-2 border-gray-600 hover:border-blue-400'
+                    }`}
+                    title="制造台 Mk.I"
+                  >
+                    <img src="/icon/Vanilla/assembler-1.png" alt="制造台 Mk.I" className="w-8 h-8" />
+                  </div>
+                  <div 
+                    onClick={() => handleGlobalFactoryChange('assembler', 2304)}
+                    className={`p-1 rounded cursor-pointer transition-colors ${
+                      globalFactorySelections.assembler === 2304
+                        ? 'bg-blue-500/30 border-2 border-blue-500'
+                        : 'bg-gray-700/50 border-2 border-gray-600 hover:border-blue-400'
+                    }`}
+                    title="制造台 Mk.II"
+                  >
+                    <img src="/icon/Vanilla/assembler-2.png" alt="制造台 Mk.II" className="w-8 h-8" />
+                  </div>
+                  <div 
+                    onClick={() => handleGlobalFactoryChange('assembler', 2305)}
+                    className={`p-1 rounded cursor-pointer transition-colors ${
+                      globalFactorySelections.assembler === 2305
+                        ? 'bg-blue-500/30 border-2 border-blue-500'
+                        : 'bg-gray-700/50 border-2 border-gray-600 hover:border-blue-400'
+                    }`}
+                    title="制造台 Mk.III"
+                  >
+                    <img src="/icon/Vanilla/assembler-3.png" alt="制造台 Mk.III" className="w-8 h-8" />
+                  </div>
+                  <div 
+                    onClick={() => handleGlobalFactoryChange('assembler', 2318)}
+                    className={`p-1 rounded cursor-pointer transition-colors ${
+                      globalFactorySelections.assembler === 2318
+                        ? 'bg-blue-500/30 border-2 border-blue-500'
+                        : 'bg-gray-700/50 border-2 border-gray-600 hover:border-blue-400'
+                    }`}
+                    title="重组式制造台"
+                  >
+                    <img src="/icon/Vanilla/assembler-4.png" alt="重组式制造台" className="w-8 h-8" />
+                  </div>
+                </div>
+              </div>
+              
+              {/* 研究站 */}
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-gray-500 text-center">研究站</span>
+                <div className="flex items-center gap-1">
+                  <div 
+                    onClick={() => handleGlobalFactoryChange('lab', 2901)}
+                    className={`p-1 rounded cursor-pointer transition-colors ${
+                      globalFactorySelections.lab === 2901
+                        ? 'bg-blue-500/30 border-2 border-blue-500'
+                        : 'bg-gray-700/50 border-2 border-gray-600 hover:border-blue-400'
+                    }`}
+                    title="矩阵研究站"
+                  >
+                    <img src="/icon/Vanilla/lab.png" alt="矩阵研究站" className="w-8 h-8" />
+                  </div>
+                  <div 
+                    onClick={() => handleGlobalFactoryChange('lab', 2902)}
+                    className={`p-1 rounded cursor-pointer transition-colors ${
+                      globalFactorySelections.lab === 2902
+                        ? 'bg-blue-500/30 border-2 border-blue-500'
+                        : 'bg-gray-700/50 border-2 border-gray-600 hover:border-blue-400'
+                    }`}
+                    title="自演化研究站"
+                  >
+                    <img src="/icon/Vanilla/lab-2.png" alt="自演化研究站" className="w-8 h-8" />
+                  </div>
+                </div>
+              </div>
+              
+              {/* 采矿机 */}
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-gray-500 text-center">采矿机</span>
+                <div className="flex items-center gap-1">
+                  <div 
+                    onClick={() => handleGlobalFactoryChange('miner', 2301)}
+                    className={`p-1 rounded cursor-pointer transition-colors ${
+                      globalFactorySelections.miner === 2301
+                        ? 'bg-blue-500/30 border-2 border-blue-500'
+                        : 'bg-gray-700/50 border-2 border-gray-600 hover:border-blue-400'
+                    }`}
+                    title="采矿机"
+                  >
+                    <img src="/icon/Vanilla/mining-drill.png" alt="采矿机" className="w-8 h-8" />
+                  </div>
+                  <div 
+                    onClick={() => handleGlobalFactoryChange('miner', 2316)}
+                    className={`p-1 rounded cursor-pointer transition-colors ${
+                      globalFactorySelections.miner === 2316
+                        ? 'bg-blue-500/30 border-2 border-blue-500'
+                        : 'bg-gray-700/50 border-2 border-gray-600 hover:border-blue-400'
+                    }`}
+                    title="大型采矿机"
+                  >
+                    <img src="/icon/Vanilla/mining-drill-mk2.png" alt="大型采矿机" className="w-8 h-8" />
+                  </div>
+                </div>
+              </div>
+              
+              {/* 化工厂 */}
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-gray-500 text-center">化工厂</span>
+                <div className="flex items-center gap-1">
+                  <div 
+                    onClick={() => handleGlobalFactoryChange('chemical', 2309)}
+                    className={`p-1 rounded cursor-pointer transition-colors ${
+                      globalFactorySelections.chemical === 2309
+                        ? 'bg-blue-500/30 border-2 border-blue-500'
+                        : 'bg-gray-700/50 border-2 border-gray-600 hover:border-blue-400'
+                    }`}
+                    title="化工厂"
+                  >
+                    <img src="/icon/Vanilla/chemical-plant.png" alt="化工厂" className="w-8 h-8" />
+                  </div>
+                  <div 
+                    onClick={() => handleGlobalFactoryChange('chemical', 2317)}
+                    className={`p-1 rounded cursor-pointer transition-colors ${
+                      globalFactorySelections.chemical === 2317
+                        ? 'bg-blue-500/30 border-2 border-blue-500'
+                        : 'bg-gray-700/50 border-2 border-gray-600 hover:border-blue-400'
+                    }`}
+                    title="量子化工厂"
+                  >
+                    <img src="/icon/Vanilla/chemical-plant-2.png" alt="量子化工厂" className="w-8 h-8" />
+                  </div>
+                </div>
+              </div>
+              
+            </div>
+          </div>
+        </div>
 
         {/* 已选择的物品需求列表 */}
         <div className="mt-8 space-y-6">
