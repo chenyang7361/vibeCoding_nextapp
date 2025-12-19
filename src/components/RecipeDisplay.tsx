@@ -27,18 +27,21 @@ function renderSingleRecipe(
   recipe: Recipe, 
   items: Item[], 
   isSelected: boolean,
-  onClick?: () => void
+  onClick?: (e: React.MouseEvent) => void
 ) {
   // 如果没有原料(如采矿配方、无中生有配方),只显示产出
   if (!recipe.Items || recipe.Items.length === 0) {
     return (
       <div 
-        className={`flex items-center gap-1 flex-wrap px-2 py-1 rounded cursor-pointer transition-colors ${
+        className={`inline-flex items-center gap-1 px-2 py-1 rounded cursor-pointer transition-colors ${
           isSelected 
             ? 'bg-blue-500/20 border border-blue-500/50' 
             : 'bg-gray-800/30 border border-gray-700/30 hover:border-blue-500/30'
         }`}
-        onClick={onClick}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick?.(e);
+        }}
         title={recipe.Name}
       >
         {recipe.Results && recipe.Results.map((resultId, index) => {
@@ -64,12 +67,15 @@ function renderSingleRecipe(
   // 有原料的配方
   return (
     <div 
-      className={`flex items-center gap-1 flex-wrap px-2 py-1 rounded cursor-pointer transition-colors ${
+      className={`inline-flex items-center gap-1 px-2 py-1 rounded cursor-pointer transition-colors ${
         isSelected 
           ? 'bg-blue-500/20 border border-blue-500/50' 
           : 'bg-gray-800/30 border border-gray-700/30 hover:border-blue-500/30'
       }`}
-      onClick={onClick}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick?.(e);
+      }}
       title={recipe.Name}
     >
       {/* 输入材料 */}
@@ -140,7 +146,10 @@ export default function RecipeDisplay({
               r, 
               items, 
               r.ID === (selectedRecipeId || recipe.ID),
-              onRecipeChange ? () => onRecipeChange(r.ID) : undefined
+              onRecipeChange ? (e) => {
+                e.stopPropagation();
+                onRecipeChange(r.ID);
+              } : undefined
             )}
           </div>
         ))}

@@ -15,6 +15,7 @@ interface ItemDemand {
   perMinute: number;
   materials: MaterialNode[];
   recipeSelections: Map<number, number>;  // 存储用户选择的配方 (物品ID -> 配方ID)
+  factorySelections: Map<number, number>;  // 存储用户选择的工厂 (物品ID -> 工厂ID)
 }
 
 /**
@@ -55,8 +56,10 @@ export default function CalculatorPage() {
   const handleSelectItem = (item: { ID: number; Name: string; IconName: string }) => {
     // 初始化配方选择映射
     const recipeSelections = new Map<number, number>();
+    // 初始化工厂选择映射
+    const factorySelections = new Map<number, number>();
     // 计算材料分解树(默认每分钟60个)
-    const materials = getMaterialTree(item.ID, 60, items, recipes, factories, new Set(), recipeSelections);
+    const materials = getMaterialTree(item.ID, 60, items, recipes, factories, new Set(), recipeSelections, factorySelections);
     
     // 将选中的物品添加到需求列表
     setDemands([...demands, {
@@ -65,7 +68,8 @@ export default function CalculatorPage() {
       iconName: item.IconName,
       perMinute: 60,
       materials: materials,
-      recipeSelections: recipeSelections
+      recipeSelections: recipeSelections,
+      factorySelections: factorySelections
     }]);
     setShowSelector(false);
   };
@@ -100,7 +104,7 @@ export default function CalculatorPage() {
     // 有效值,更新需求列表
     const newDemands = [...demands];
     newDemands[index].perMinute = numValue;
-    // 重新计算材料数量，使用已保存的配方选择
+    // 重新计算材料数量，使用已保存的配方和工厂选择
     newDemands[index].materials = getMaterialTree(
       newDemands[index].id, 
       numValue, 
@@ -108,7 +112,8 @@ export default function CalculatorPage() {
       recipes, 
       factories, 
       new Set(), 
-      newDemands[index].recipeSelections
+      newDemands[index].recipeSelections,
+      newDemands[index].factorySelections
     );
     setDemands(newDemands);
     
@@ -134,7 +139,31 @@ export default function CalculatorPage() {
       recipes,
       factories,
       new Set(),
-      demand.recipeSelections
+      demand.recipeSelections,
+      demand.factorySelections
+    );
+    
+    setDemands(newDemands);
+  };
+
+  // 处理工厂切换
+  const handleFactoryChange = (demandIndex: number, materialId: number, factoryId: number) => {
+    const newDemands = [...demands];
+    const demand = newDemands[demandIndex];
+    
+    // 更新工厂选择
+    demand.factorySelections.set(materialId, factoryId);
+    
+    // 重新计算材料树
+    demand.materials = getMaterialTree(
+      demand.id,
+      demand.perMinute,
+      items,
+      recipes,
+      factories,
+      new Set(),
+      demand.recipeSelections,
+      demand.factorySelections
     );
     
     setDemands(newDemands);
@@ -266,7 +295,39 @@ export default function CalculatorPage() {
                         </div>
                       </div>
                       {/* 工厂信息 */}
-                      {material.factoryIconName && (
+                      {material.availableFactories && material.availableFactories.length > 0 ? (
+                        <div className="flex flex-col gap-1 border-l border-gray-700 pl-3">
+                          {material.availableFactories.map(factory => (
+                            <div 
+                              key={factory.id} 
+                              className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer transition-colors ${
+                                factory.id === material.selectedFactoryId
+                                  ? 'bg-purple-500/20 border border-purple-500/50'
+                                  : 'bg-gray-800/30 border border-gray-700/30 hover:border-purple-500/30'
+                              }`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleFactoryChange(index, material.id, factory.id);
+                              }}
+                              title={factory.name}
+                            >
+                              {/* 工厂图标 */}
+                              <img 
+                                src={`/icon/Vanilla/${factory.iconName}.png`}
+                                alt={factory.name}
+                                className="w-6 h-6"
+                                title={factory.name}
+                              />
+                              {/* 工厂数量 - 只显示选中的 */}
+                              {factory.id === material.selectedFactoryId && (
+                                <span className="text-xs text-purple-300 font-mono">
+                                  {factory.count.toFixed(3)}
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : material.factoryIconName ? (
                         <div className="flex items-center gap-2 border-l border-gray-700 pl-3">
                           {/* 工厂图标 */}
                           <img 
@@ -280,7 +341,7 @@ export default function CalculatorPage() {
                             {material.factoryCount?.toFixed(3)}
                           </span>
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   ))}
                 </div>
