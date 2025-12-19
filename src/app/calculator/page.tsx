@@ -14,6 +14,7 @@ interface ItemDemand {
   iconName: string;
   perMinute: number;
   materials: MaterialNode[];
+  recipeSelections: Map<number, number>;  // 存储用户选择的配方 (物品ID -> 配方ID)
 }
 
 /**
@@ -52,8 +53,10 @@ export default function CalculatorPage() {
 
   // 处理用户选择物品
   const handleSelectItem = (item: { ID: number; Name: string; IconName: string }) => {
+    // 初始化配方选择映射
+    const recipeSelections = new Map<number, number>();
     // 计算材料分解树(默认每分钟60个)
-    const materials = getMaterialTree(item.ID, 60, items, recipes, factories);
+    const materials = getMaterialTree(item.ID, 60, items, recipes, factories, new Set(), recipeSelections);
     
     // 将选中的物品添加到需求列表
     setDemands([...demands, {
@@ -61,7 +64,8 @@ export default function CalculatorPage() {
       name: item.Name,
       iconName: item.IconName,
       perMinute: 60,
-      materials: materials
+      materials: materials,
+      recipeSelections: recipeSelections
     }]);
     setShowSelector(false);
   };
@@ -96,14 +100,44 @@ export default function CalculatorPage() {
     // 有效值,更新需求列表
     const newDemands = [...demands];
     newDemands[index].perMinute = numValue;
-    // 重新计算材料数量
-    newDemands[index].materials = getMaterialTree(newDemands[index].id, numValue, items, recipes, factories);
+    // 重新计算材料数量，使用已保存的配方选择
+    newDemands[index].materials = getMaterialTree(
+      newDemands[index].id, 
+      numValue, 
+      items, 
+      recipes, 
+      factories, 
+      new Set(), 
+      newDemands[index].recipeSelections
+    );
     setDemands(newDemands);
     
     // 清除临时值
     const newTempValues = { ...tempValues };
     delete newTempValues[index];
     setTempValues(newTempValues);
+  };
+
+  // 处理配方切换
+  const handleRecipeChange = (demandIndex: number, materialId: number, recipeId: number) => {
+    const newDemands = [...demands];
+    const demand = newDemands[demandIndex];
+    
+    // 更新配方选择
+    demand.recipeSelections.set(materialId, recipeId);
+    
+    // 重新计算材料树
+    demand.materials = getMaterialTree(
+      demand.id,
+      demand.perMinute,
+      items,
+      recipes,
+      factories,
+      new Set(),
+      demand.recipeSelections
+    );
+    
+    setDemands(newDemands);
   };
 
   // 处理回车键
@@ -222,7 +256,13 @@ export default function CalculatorPage() {
                         </span>
                         {/* 配方显示 */}
                         <div className="border-l border-gray-700 pl-3 flex-1">
-                          <RecipeDisplay recipe={material.recipe} items={items} />
+                          <RecipeDisplay 
+                            recipe={material.recipe} 
+                            items={items}
+                            availableRecipes={material.availableRecipes}
+                            selectedRecipeId={material.selectedRecipeId}
+                            onRecipeChange={(recipeId) => handleRecipeChange(index, material.id, recipeId)}
+                          />
                         </div>
                       </div>
                       {/* 工厂信息 */}

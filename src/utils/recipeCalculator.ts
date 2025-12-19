@@ -42,7 +42,19 @@ export interface MaterialNode {
   factoryName?: string;
   factoryIconName?: string;
   factoryCount?: number;
-  recipe?: Recipe;  // 添加配方信息
+  recipe?: Recipe;  // 当前使用的配方
+  availableRecipes?: Recipe[];  // 该物品的所有可用配方
+  selectedRecipeId?: number;  // 当前选中的配方ID
+}
+
+/**
+ * 获取物品的所有可用配方
+ * @param itemId 物品ID
+ * @param recipes 所有配方数据
+ * @returns 该物品的所有配方列表
+ */
+export function getRecipesForItem(itemId: number, recipes: Recipe[]): Recipe[] {
+  return recipes.filter(r => r.Results && r.Results.includes(itemId));
 }
 
 /**
@@ -53,6 +65,7 @@ export interface MaterialNode {
  * @param recipes 所有配方数据
  * @param factories 所有工厂数据
  * @param visited 已访问的物品集合(防止循环依赖)
+ * @param recipeSelections 用户选择的配方映射 (物品ID -> 配方ID)
  * @returns 材料列表(包含每分钟需求量)
  */
 export function getMaterialTree(
@@ -61,7 +74,8 @@ export function getMaterialTree(
   items: Item[],
   recipes: Recipe[],
   factories: Factory[],
-  visited = new Set<number>()
+  visited = new Set<number>(),
+  recipeSelections: Map<number, number> = new Map()
 ): MaterialNode[] {
   // 防止循环依赖
   if (visited.has(itemId)) {
@@ -75,8 +89,18 @@ export function getMaterialTree(
     return [];
   }
 
-  // 查找该物品的配方(使用Results字段查找)
-  const recipe = recipes.find(r => r.Results && r.Results.includes(itemId));
+  // 获取该物品的所有可用配方
+  const availableRecipes = getRecipesForItem(itemId, recipes);
+  
+  // 确定使用哪个配方: 1.用户选择的 2.默认第一个
+  let recipe: Recipe | undefined;
+  const selectedRecipeId = recipeSelections.get(itemId);
+  if (selectedRecipeId) {
+    recipe = availableRecipes.find(r => r.ID === selectedRecipeId);
+  }
+  if (!recipe && availableRecipes.length > 0) {
+    recipe = availableRecipes[0];  // 默认使用第一个配方
+  }
   
   // 计算配方产出比例
   const resultIndex = recipe?.Results.indexOf(itemId) ?? -1;
@@ -109,7 +133,9 @@ export function getMaterialTree(
       factoryName: factory?.Name,
       factoryIconName: factory?.IconName,
       factoryCount: factoryCount > 0 ? factoryCount : undefined,
-      recipe: recipe
+      recipe: recipe,
+      availableRecipes: availableRecipes,
+      selectedRecipeId: recipe?.ID
     }];
   }
   
@@ -125,7 +151,9 @@ export function getMaterialTree(
     factoryName: factory?.Name,
     factoryIconName: factory?.IconName,
     factoryCount: factoryCount,
-    recipe: recipe
+    recipe: recipe,
+    availableRecipes: availableRecipes,
+    selectedRecipeId: recipe.ID
   });
 
   // 递归分解每个原材料
@@ -134,7 +162,7 @@ export function getMaterialTree(
     const materialCount = recipe.ItemCounts[index] || 1;
     const materialPerMinute = (targetPerMinute * materialCount) / resultCount;
     
-    const subMaterials = getMaterialTree(materialId, materialPerMinute, items, recipes, factories, new Set(visited));
+    const subMaterials = getMaterialTree(materialId, materialPerMinute, items, recipes, factories, new Set(visited), recipeSelections);
     subMaterials.forEach(mat => {
       // 如果已存在,累加数量
       const existingMat = result.find(r => r.id === mat.id);
