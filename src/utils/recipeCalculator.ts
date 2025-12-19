@@ -79,6 +79,94 @@ export function getRecipesForItem(itemId: number, recipes: Recipe[]): Recipe[] {
  * @param factorySelections 用户选择的工厂映射 (物品ID -> 工厂ID)
  * @returns 材料列表(包含每分钟需求量)
  */
+/**
+ * 计算所有配方产生的副产物
+ * @param materials 材料节点列表
+ * @returns 副产物映射 (物品ID -> 每分钟产量)
+ */
+function calculateByproducts(materials: MaterialNode[]): Map<number, number> {
+  const byproducts = new Map<number, number>();
+  
+  materials.forEach(material => {
+    const recipe = material.recipe;
+    if (!recipe || !recipe.Results || recipe.Results.length <= 1) {
+      // 没有配方或只有一个产物,没有副产物
+      return;
+    }
+    
+    // 一个配方可能有多个产物,第一个是主产物,其他的是副产物
+    recipe.Results.forEach((resultId, index) => {
+      if (resultId === material.id) {
+        // 这是主产物,不是副产物
+        return;
+      }
+      
+      // 这是副产物
+      const resultCount = recipe.ResultCounts[index] || 1;
+      const mainResultIndex = recipe.Results.indexOf(material.id);
+      const mainResultCount = recipe.ResultCounts[mainResultIndex] || 1;
+      
+      // 计算副产物的每分钟产量
+      // 副产物产量 = (主产物需求量 / 主产物配方产出) * 副产物配方产出
+      const byproductPerMinute = (material.perMinute / mainResultCount) * resultCount;
+      
+      // 累加副产物
+      const existing = byproducts.get(resultId) || 0;
+      byproducts.set(resultId, existing + byproductPerMinute);
+    });
+  });
+  
+  return byproducts;
+}
+
+/**
+ * 用副产物抵扣原材料需求
+ * @param materials 材料节点列表
+ * @param byproducts 副产物映射
+ * @returns 抵扣后的材料列表
+ */
+function deductByproducts(
+  materials: MaterialNode[],
+  byproducts: Map<number, number>
+): MaterialNode[] {
+  // 创建新的材料列表,避免修改原列表
+  const result: MaterialNode[] = [];
+  
+  materials.forEach(material => {
+    const byproductAmount = byproducts.get(material.id) || 0;
+    
+    if (byproductAmount > 0) {
+      // 有副产物可以抵扣
+      const newPerMinute = material.perMinute - byproductAmount;
+      
+      if (newPerMinute > 0.001) {
+        // 副产物不足以完全抵扣,需要保留这个材料但减少数量
+        const ratio = newPerMinute / material.perMinute;
+        
+        // 重新计算工厂数量
+        let newFactoryCount = material.factoryCount ? material.factoryCount * ratio : undefined;
+        let newAvailableFactories = material.availableFactories?.map(factory => ({
+          ...factory,
+          count: factory.count * ratio
+        }));
+        
+        result.push({
+          ...material,
+          perMinute: newPerMinute,
+          factoryCount: newFactoryCount,
+          availableFactories: newAvailableFactories
+        });
+      }
+      // 如果 newPerMinute <= 0.001,说明副产物完全抵扣了需求,不添加到结果中
+    } else {
+      // 没有副产物抵扣,保持原样
+      result.push(material);
+    }
+  });
+  
+  return result;
+}
+
 export function getMaterialTree(
   itemId: number,
   targetPerMinute: number,
@@ -233,5 +321,12 @@ export function getMaterialTree(
     });
   });
 
-  return result;
+  // 应用副产物抵扣逻辑
+  // 1. 计算所有配方产生的副产物
+  const byproducts = calculateByproducts(result);
+  
+  // 2. 用副产物抵扣原材料需求
+  const deductedResult = deductByproducts(result, byproducts);
+  
+  return deductedResult;
 }
